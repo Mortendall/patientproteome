@@ -1,0 +1,45 @@
+---
+title: "Draft R Markdown document"
+author: "Morten"
+output: html_document
+---
+
+
+
+```{r}
+
+missingSamples <- data.table(is.na(res), keep.rownames = TRUE) %>% 
+  melt(measure.vars = colnames(res), variable.name = "sample")
+
+setnames(missingSamples, "rn", "Accession")
+setnames(as.data.frame(meta_data),"samples")
+
+missingSamples <- missingSamples %>% 
+  dplyr::mutate(Group = meta_data)
+merge(setup, missingSamples, by = "sample")
+missingSamples <- missingSamples[, .(nMissing = sum(value)), by = c("Accession", "group")] %>%
+  dcast(Accession ~ group, value.var = "nMissing")
+
+setup[, .N, by = "group"]
+cutoff <- 2
+tooManyMissing <- missingSamples
+
+
+```
+
+```{r}
+file_name <- "ProteinGroups_Filtered_toMorten.csv"
+  data_file <- fs::dir_ls(here("data-raw/"),
+                          regexp = file_name,
+                          recurse = TRUE)
+  proteome_data <- vroom::vroom(data_file)
+  meta_data <- as.data.frame(t(proteome_data[1,]))
+  meta_data <- meta_data %>% 
+    mutate(sample = row.names(meta_data))
+  colnames(meta_data)[1] = "Group"
+  meta_data <- meta_data[1:35,]
+  return(meta_data)
+}
+
+```
+
