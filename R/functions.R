@@ -190,7 +190,7 @@ MDSPlotGenerator <- function(data, meta){
 DEG_analysis <- function(data, meta,proteome_key){
   design <- stats::model.matrix( ~ 0 + Group, meta)
   colnames(design) <- stringr::str_remove_all(colnames(design), "Group")
-  fit <- limma::lmFit(selectedData, design = design, method = "robust")
+  fit <- limma::lmFit(data, design = design, method = "robust")
   cont.matrix <- limma::makeContrasts(
     NASH_vs_con = NASH - Control,
     levels = design)
@@ -218,3 +218,100 @@ load_limma_data <- function(file_name) {
   limma_analysis <-read.xlsx(data_file)
   return(limma_analysis)
 }
+
+#' Gene ontology enrichment analysis of genes generated from a results file
+#'
+#' @param result_list results table generated from limma. Must be data.table and contain a SYMBOL annotation column
+#'
+#' @return a list containing enrichresults for each element in the results file list
+
+
+goAnalysis <- function(result_list){
+  result_list <- as.data.table(result_list)
+  bg_list <- clusterProfiler::bitr(
+    result_list[,Gene],
+    fromType = "SYMBOL",
+    toType = "ENTREZID",
+    OrgDb = "org.Hs.eg.db",
+    drop = T
+  )
+
+    sig_list<- result_list %>%
+      dplyr::filter(adj.P.Val<0.05)
+
+    eg <- clusterProfiler::bitr(
+      sig_list$Gene,
+      fromType = "SYMBOL",
+      toType = "ENTREZID",
+      OrgDb = "org.Hs.eg.db",
+      drop = T
+    )
+    goResults <- clusterProfiler::enrichGO(gene = eg$ENTREZID,
+                                           universe = bg_list$ENTREZID,
+                                           OrgDb = org.Hs.eg.db,
+                                           ont = "BP")
+
+    return(goResults)
+  }
+
+#' File exporter - exports GOresults as an excel sheet, and prints dotplot and cnet plots
+#'
+#' @param goList a list object containing one or more enrichResults
+#'
+#' @return
+
+printGOterms <- function(goResult){
+  goList <- goResult@result
+  openxlsx::write.xlsx(goList, file = here("data/NASH_NAFLD_GOterms.xlsx"), asTable = TRUE)
+    dotplot <- enrichplot::dotplot(goResult, title = names(goList),size = 1)
+    ggplot2::ggsave(dotplot, filename = "data/figures/dotplot.png",width = 12, height = 12, units = "cm", scale = 2.5)
+    goResult_anno <- clusterProfiler::setReadable(goResult, OrgDb = org.Hs.eg.db, keyType="ENTREZID")
+    cnetplot <- enrichplot::cnetplot(goResult_anno, size = 1)
+    ggplot2::ggsave(cnetplot, filename = "data/figures/cnetplot.png", scale = 2.5)
+
+    }
+
+
+#' Title
+#'
+#' @param limma_results
+#'
+#' @return
+#' @export
+#'
+#' @examples
+NAD_screener <- function(limma_results){
+  Selected_candidates <- c("NAMPT",
+                           "NMNAT1",
+                           "NMNAT2",
+                           "NMNAT3",
+                           "NMRK1",
+                           "NMRK2",
+                           "NADSYN1",
+                           "NADSYN",
+                           "TDO2",
+                           "IDO",
+                           "NAPRT",
+                           "SIRT1",
+                           "SIRT3",
+                           "PARP1",
+                           "CD38",
+                           "NNMT",
+                           "NADK",
+                           "HADH",
+                           "KMO",
+                           "AFMID")
+  NAD_screen <- as.data.table(limma_results) %>%
+    filter(limma_results[,Gene] %in% Selected_candidates)
+
+ volcano_plot <-  ggplot(NAD_screen, aes(x = logFC, y = -log10(adj.P.Val))) +
+    geom_point()+
+    geom_text(label = NAD_screen$Gene,
+              nudge_x = 0.02,
+              nudge_y = 0.05,
+              check_overlap = T)
+ ggsave(volcano_plot, filename = "data/figures/NAD_terms.png", scale = 2.5)
+ return(NAD_screen)
+
+}
+
