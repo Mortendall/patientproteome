@@ -14,3 +14,12 @@ rownames<-rownames(proteome_data)
 rownames(res)<-rownames
 
 selectedData <- select_sufficient_counts(res, meta_data, 5)
+#check our meta_data and selectedData are properly aligned
+all(colnames(selectedData) == meta_data$sample)
+
+#MDSPlotGenerator(selectedData, meta_data)
+
+#limma_analysis <- DEG_analysis(selectedData,meta_data,protein_key)
+
+DEG_data <- load_limma_data("limma_results.xlsx")
+

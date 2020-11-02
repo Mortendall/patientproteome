@@ -4,6 +4,9 @@ library(tidyverse)
 library(vroom)
 library(data.table)
 library(limma)
+library(gridExtra)
+library(openxlsx)
+library(readxl)
 
 #' Program to create a count matrix
 #'
@@ -93,6 +96,8 @@ protein_key_loader <- function(file_name) {
   proteome_data <- vroom::vroom(data_file)
   proteome_data <- proteome_data[-1,]
   protein_key <- proteome_data[, 36:37]
+  setnames(protein_key,"PG.ProteinAccessions","Accession")
+  setnames(protein_key, "PG.Genes","Gene")
   return(protein_key)
 }
 
@@ -128,7 +133,6 @@ select_sufficient_counts <- function(input_data, meta_data, cutoff) {
 
   setnames(missingSamples, "rn", "Accession")
   meta_data <- as.data.table(meta_data)
-  meta_data[, sample:=as.character(sample)]
 
   setkey(meta_data, sample)
   missingSamples <- merge(meta_data, missingSamples, by = "sample")
@@ -138,7 +142,79 @@ select_sufficient_counts <- function(input_data, meta_data, cutoff) {
   meta_data[, .N, by = "Group"]
   tooManyMissing <- missingSamples[Control > cutoff |
                                      NASH > cutoff , Accession]
-  input_data <- input_data[!rownames(input_data) %in% tooManyMissing,]
-  input_data <- as.data.frame(input_data)
-  return(input_data)
+  results <- input_data[!rownames(input_data) %in% tooManyMissing,]
+  results <- as.data.frame(results)
+  return(results)
+}
+
+#' MDS plot generator
+#'
+#' @param data a count matrix
+#' @param meta a setup matrix
+#'
+
+
+MDSPlotGenerator <- function(data, meta){
+  mdsData <- plotMDS(data, ndim = 3, plot = FALSE)$cmdscale.out
+  mdsData <- cbind(mdsData, meta)
+  colnames(mdsData)[1]="V1"
+  colnames(mdsData)[2]="V2"
+  colnames(mdsData)[3]="V3"
+  plot1 <- ggplot(mdsData, aes(x = V1, y = V2, colour = Group)) +
+    geom_point() +
+    scale_color_brewer(name = "Significant", type = "qual", palette = "Set1")
+
+  plot2 <- ggplot(mdsData, aes(x = V1, y = V3, colour = Group)) +
+    geom_point() +
+    scale_color_brewer(name = "Significant", type = "qual", palette = "Set1")
+
+  plot3 <- ggplot(mdsData, aes(x = V2, y = V3, colour = Group)) +
+    geom_point() +
+    scale_color_brewer(name = "Significant", type = "qual", palette = "Set1")
+
+  plots_all <- gridExtra::grid.arrange(plot1, plot2, plot3, ncol = 1)
+  dir.create(here("data/figures"), showWarnings = F)
+  ggplot2::ggsave(plots_all, filename = here("data/figures/MDSplots.png"),scale = 2.5)
+
+  print("MDSplots have been saved in Data")
+}
+
+#' Differentially expressed gene analysis
+#'
+#' @param data a count matrix
+#' @param meta setup data
+#' @param proteome_key
+#'
+#' @return a DEG analysis
+
+DEG_analysis <- function(data, meta,proteome_key){
+  design <- stats::model.matrix( ~ 0 + Group, meta)
+  colnames(design) <- stringr::str_remove_all(colnames(design), "Group")
+  fit <- limma::lmFit(selectedData, design = design, method = "robust")
+  cont.matrix <- limma::makeContrasts(
+    NASH_vs_con = NASH - Control,
+    levels = design)
+  fit2 <- limma::contrasts.fit(fit, cont.matrix)
+  fit2 <- eBayes(fit2, trend = TRUE, robust = TRUE)
+  NASH_vs_con = topTable(fit2, coef = "NASH_vs_con", number = Inf, p.value = 1) %>% data.table(keep.rownames = TRUE)
+  setnames(NASH_vs_con, "rn","Accession")
+  protein_key<-as.data.table(protein_key)
+  setkey(protein_key, Accession)
+  NASH_vs_con[, Gene:=protein_key[Accession, Gene]]
+  write.xlsx(NASH_vs_con, file = here("/data/limma_results.xlsx"))
+  return(NASH_vs_con)
+}
+
+#' Limma result data loader
+#'
+#' @param file_name name of the limma_results file
+#'
+#' @return limma analysis
+
+load_limma_data <- function(file_name) {
+  data_file <- fs::dir_ls(here("data/"),
+                          regexp = file_name,
+                          recurse = TRUE)
+  limma_analysis <-read.xlsx(data_file)
+  return(limma_analysis)
 }
