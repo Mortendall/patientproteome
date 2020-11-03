@@ -6,7 +6,7 @@ library(data.table)
 library(limma)
 library(gridExtra)
 library(openxlsx)
-library(readxl)
+library(pheatmap)
 
 #' Program to create a count matrix
 #'
@@ -127,24 +127,28 @@ data_processor <- function(proteome_data)
 #'
 #' @return a count matrix where the samples with too few counts are removed
 
-select_sufficient_counts <- function(input_data, meta_data, cutoff) {
+select_sufficient_counts <- function(input_data, meta, cutoff) {
   missingSamples <- data.table(is.na(input_data), keep.rownames = TRUE) %>%
     melt(measure.vars = colnames(input_data), variable.name = "sample")
 
   setnames(missingSamples, "rn", "Accession")
-  meta_data <- as.data.table(meta_data)
+  meta <- as.data.table(meta)
 
-  setkey(meta_data, sample)
-  missingSamples <- merge(meta_data, missingSamples, by = "sample")
-  missingSamples <- missingSamples[, .(nMissing = sum(value)), by = c("Accession", "Group")] %>%
-    dcast(Accession ~ Group, value.var = "nMissing")
+  setkey(meta, sample)
+  missingSamples <- merge(meta, missingSamples, by = "sample")
+  missingSamples<- missingSamples %>%
+    group_by(Group, Accession) %>%
+    summarise(nMissing = sum(value)) %>%
+    pivot_wider(names_from = Group, values_from = nMissing)
 
-  meta_data[, .N, by = "Group"]
-  tooManyMissing <- missingSamples[Control > cutoff |
-                                     NASH > cutoff , Accession]
-  results <- input_data[!rownames(input_data) %in% tooManyMissing,]
-  results <- as.data.frame(results)
-  return(results)
+  cutoff <- 5
+  tooManyMissing <- missingSamples %>%
+    group_by(Accession) %>%
+    filter(Control >cutoff | NASH > cutoff)
+  results <- as.data.frame(input_data)
+  results <- results %>%
+    filter(!rownames(input_data) %in% tooManyMissing$Accession)
+ return(results)
 }
 
 #' MDS plot generator
@@ -188,22 +192,21 @@ MDSPlotGenerator <- function(data, meta){
 #' @return a DEG analysis
 
 DEG_analysis <- function(data, meta,proteome_key){
-  design <- stats::model.matrix( ~ 0 + Group, meta)
-  colnames(design) <- stringr::str_remove_all(colnames(design), "Group")
+  design <- stats::model.matrix( ~Group, meta)
+  colnames(design) <- c("Control","NASH_vs_con")
   fit <- limma::lmFit(data, design = design, method = "robust")
-  cont.matrix <- limma::makeContrasts(
-    NASH_vs_con = NASH - Control,
-    levels = design)
-  fit2 <- limma::contrasts.fit(fit, cont.matrix)
-  fit2 <- eBayes(fit2, trend = TRUE, robust = TRUE)
-  NASH_vs_con = topTable(fit2, coef = "NASH_vs_con", number = Inf, p.value = 1) %>% data.table(keep.rownames = TRUE)
+  fit<- eBayes(fit)
+  NASH_vs_con = topTable(fit, coef = "NASH_vs_con", number = Inf, p.value = 1) %>% data.table(keep.rownames = TRUE)
+
   setnames(NASH_vs_con, "rn","Accession")
-  protein_key<-as.data.table(protein_key)
-  setkey(protein_key, Accession)
-  NASH_vs_con[, Gene:=protein_key[Accession, Gene]]
+  proteome_key<-as.data.table(proteome_key)
+  setkey(proteome_key, Accession)
+  NASH_vs_con <- merge(NASH_vs_con, proteome_key, by = "Accession") %>%
+    arrange(adj.P.Val)
   write.xlsx(NASH_vs_con, file = here("/data/limma_results.xlsx"))
   return(NASH_vs_con)
 }
+
 
 #' Limma result data loader
 #'
@@ -229,7 +232,7 @@ load_limma_data <- function(file_name) {
 goAnalysis <- function(result_list){
   result_list <- as.data.table(result_list)
   bg_list <- clusterProfiler::bitr(
-    result_list[,Gene],
+    result_list$Gene,
     fromType = "SYMBOL",
     toType = "ENTREZID",
     OrgDb = "org.Hs.eg.db",
@@ -263,7 +266,7 @@ goAnalysis <- function(result_list){
 printGOterms <- function(goResult){
   goList <- goResult@result
   openxlsx::write.xlsx(goList, file = here("data/NASH_NAFLD_GOterms.xlsx"), asTable = TRUE)
-    dotplot <- enrichplot::dotplot(goResult, title = names(goList),size = 1)
+    dotplot <- enrichplot::dotplot(goResult, title = names(goList))
     ggplot2::ggsave(dotplot, filename = "data/figures/dotplot.png",width = 12, height = 12, units = "cm", scale = 2.5)
     goResult_anno <- clusterProfiler::setReadable(goResult, OrgDb = org.Hs.eg.db, keyType="ENTREZID")
     cnetplot <- enrichplot::cnetplot(goResult_anno, size = 1)
@@ -302,7 +305,7 @@ NAD_screener <- function(limma_results){
                            "KMO",
                            "AFMID")
   NAD_screen <- as.data.table(limma_results) %>%
-    filter(limma_results[,Gene] %in% Selected_candidates)
+    filter(limma_results$Gene %in% Selected_candidates)
 
  volcano_plot <-  ggplot(NAD_screen, aes(x = logFC, y = -log10(adj.P.Val))) +
     geom_point()+
@@ -315,3 +318,74 @@ NAD_screener <- function(limma_results){
 
 }
 
+#' Generates and saves a heatmap of NAD-related terms. Modify for correct regex naming
+#'
+#' @param count_matrix generated with the proteome data loader
+#' @param protein_key containing accession and gene names
+
+
+heatmap_generator <- function(count_matrix, protein_key){
+  Selected_candidates <- c("NAMPT",
+                           "NMNAT1",
+                           "NMNAT2",
+                           "NMNAT3",
+                           "NMRK1",
+                           "NMRK2",
+                           "NADSYN1",
+                           "NADSYN",
+                           "TDO2",
+                           "IDO",
+                           "NAPRT",
+                           "SIRT1",
+                           "SIRT3",
+                           "PARP1",
+                           "CD38",
+                           "NNMT",
+                           "NADK",
+                           "HADH",
+                           "KMO",
+                           "AFMID")
+  Selected_candidates <- as.data.table(Selected_candidates)
+  setnames(Selected_candidates, "Selected_candidates", "Gene")
+  Selected_candidates <- merge(Selected_candidates, protein_key, by="Gene")
+
+  Candidates_raw <- count_matrix%>%
+    filter(rownames(count_matrix) %in% Selected_candidates$Accession)
+
+  name_key <- rownames(Candidates_raw)
+  name_key <-  as.data.table(name_key)
+  setnames(name_key, "name_key", "Accession")
+
+  name_key <- merge(name_key, protein_key, by= "Accession")
+  name_key %>%
+    group_by(Gene) %>%
+    count("Gene")
+
+  name_key <- name_key %>%
+    mutate(Gene=
+             case_when(Accession == "A0A0A0MSE2;E9PF18;Q16836;Q16836-2;Q16836-3" ~ "HADH-1",
+                       Accession == "A0A0D9SFP2" ~ "HADH-2",
+                       TRUE ~ .$Gene))
+
+
+  rownames(Candidates_raw)<-name_key$Gene
+  colnames(Candidates_raw) <- str_extract(colnames(Candidates_raw), "[0-9][0-9]?")
+
+
+  heatmap <- pheatmap(Candidates_raw,
+                      treeheight_col = 0,
+                      treeheight_row = 0,
+                      scale = "row",
+                      legend = T,
+                      na_col = "white",
+                      Colv = NA,
+                      na.rm = T,
+                      cluster_cols = F,
+                      fontsize_row = 8,
+                      fontsize_col = 8,
+                      cellwidth = 8,
+                      cellheight = 7
+  )
+  ggsave(heatmap, filename = here("data/figures/NAD_heatmap.png"), scale = 1.5)
+
+}
