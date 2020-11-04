@@ -440,7 +440,8 @@ NAD_GO_term_extractor <- function(goResults, protein_key){
                       fontsize_row = 8,
                       fontsize_col = 8,
                       cellwidth = 8,
-                      cellheight = 7
+                      cellheight = 7,
+                      main = "NAD Metabolic Processes"
   )
   ggsave(heatmap, filename = here("data/figures/NAD_heatmap_significant.png"), scale = 1.5)
 }
