@@ -389,3 +389,58 @@ heatmap_generator <- function(count_matrix, protein_key){
   ggsave(heatmap, filename = here("data/figures/NAD_heatmap.png"), scale = 1.5)
 
 }
+
+#' NAD Metabolic Processes Extractor
+#'
+#' @param goResults a goResults object
+#' @param protein_key an accession to gene name key
+#'
+#' @return a heatmap saved in the Figures folder
+
+NAD_GO_term_extractor <- function(goResults, protein_key){
+  NAD_data <- clusterProfiler::setReadable(goResults, OrgDb = org.Hs.eg.db, keyType="ENTREZID")
+  NAD_data <- NAD_data@result
+  NAD_terms <- NAD_data %>%
+    dplyr::filter(Description == "NAD metabolic process")
+
+  NAD_candidates <- NAD_terms$geneID %>%
+    str_split("/", simplify = T)
+  NAD_candidates <- t(NAD_candidates)
+
+  Selected_candidates <- as.data.table(NAD_candidates)
+  setnames(Selected_candidates, "V1", "Gene")
+  Selected_candidates <- merge(Selected_candidates, protein_key, by="Gene")
+  Candidates_raw <- proteome_data %>%
+    filter(rownames(proteome_data) %in% Selected_candidates$Accession)
+  name_key <- rownames(Candidates_raw)
+  name_key <-  as.data.table(name_key)
+  setnames(name_key, "name_key", "Accession")
+
+  name_key <- merge(name_key, protein_key, by= "Accession")
+  name_key %>%
+    group_by(Gene) %>%
+    count("Gene")
+  name_key <- name_key %>%
+    mutate(Gene=
+             case_when(Accession == "P30613" ~ "PKLR-1",
+                       Accession == "P30613-2" ~ "PKLR-2",
+                       TRUE ~ .$Gene))
+  rownames(Candidates_raw)<-name_key$Gene
+  colnames(Candidates_raw) <- str_extract(colnames(Candidates_raw), "[0-9][0-9]?")
+
+  heatmap <- pheatmap(Candidates_raw,
+                      treeheight_col = 0,
+                      treeheight_row = 0,
+                      scale = "row",
+                      legend = T,
+                      na_col = "white",
+                      Colv = NA,
+                      na.rm = T,
+                      cluster_cols = F,
+                      fontsize_row = 8,
+                      fontsize_col = 8,
+                      cellwidth = 8,
+                      cellheight = 7
+  )
+  ggsave(heatmap, filename = here("data/figures/NAD_heatmap_significant.png"), scale = 1.5)
+}

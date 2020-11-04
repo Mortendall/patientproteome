@@ -18,14 +18,15 @@ selectedData <- select_sufficient_counts(res, meta_data)
 #check our meta_data and selectedData are properly aligned
 all(colnames(selectedData) == meta_data$sample)
 
-MDSPlotGenerator(selectedData, meta_data)
+#MDSPlotGenerator(selectedData, meta_data)
 
 #limma_analysis <- DEG_analysis(selectedData,meta_data,protein_key)
 
 DEG_data <- load_limma_data("limma_results.xlsx")
 
-goResults <- goAnalysis(DEG_data)
+#goResults <- goAnalysis(DEG_data)
 #printGOterms(goResults)
 
-NAD_data <- NAD_screener(DEG_data)
-heatmap_generator(proteome_data,protein_key)
+#NAD_data <- NAD_screener(DEG_data)
+#heatmap_generator(proteome_data,protein_key)
+#NAD_GO_term_extractor(goResults, protein_key)

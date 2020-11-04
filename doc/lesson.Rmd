@@ -9,9 +9,15 @@ output: html_document
 
 ```{r}
 
+#' NAD Metabolic Processes Extractor
+#'
+#' @param goResults a goResults object
+#' @param protein_key an accession to gene name key
+#'
+#' @return a heatmap saved in the Figures folder
 
-
-NAD_data <- clusterProfiler::setReadable(goResults, OrgDb = org.Hs.eg.db, keyType="ENTREZID")
+NAD_GO_term_extractor <- function(goResults, protein_key){
+ NAD_data <- clusterProfiler::setReadable(goResults, OrgDb = org.Hs.eg.db, keyType="ENTREZID")
 NAD_data <- NAD_data@result
 NAD_terms <- NAD_data %>% 
   dplyr::filter(Description == "NAD metabolic process")
@@ -55,8 +61,9 @@ Candidates_raw <- proteome_data %>%
                       cellwidth = 8,
                       cellheight = 7
   )
-ggsave(heatmap, filename = here("data/figures/NAD_heatmap_significant.png"), scale = 1.5)
-  
+ggsave(heatmap, filename = here("data/figures/NAD_heatmap_significant.png"), scale = 1.5) 
+}
+
 ```
 
 
